@@ -1,391 +1,860 @@
-import React, { useEffect, useRef } from "react";
-
-
-
-const BASE_THEMED_ICONS = [
-  <svg key="i1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6"><rect x="2" y="7" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="11" x2="6.01" y2="11"/></svg>,
-  <svg key="i2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>,
-  <svg key="i3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>,
-  <svg key="i4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.82.68a.93.93 0 0 1-.94 1.4L18.4 19a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1.04-.63c-.4-.1-.7-.3-1-.5s-.6-.4-1.1-.5h-2.1c-.5.1-.8.2-1.1.5s-.6.4-1.1.5c-.4.1-1.3.1-1.8.3a1.65 1.65 0 0 0-1.82.33l-1.04.68a.93.93 0 0 1-.94-1.4l.82-.68a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-.63-1.04c-.1-.4-.3-.7-.5-1s-.4-.6-.5-1.1v-2.1c.1-.5.2-.8.5-1.1s.4-.6.5-1.1c.1-.4.1-1.3.3-1.8a1.65 1.65 0 0 0-.33-1.82l-.82-.68a.93.93 0 0 1 .94-1.4l1.04.68c.5.3.8.4 1.1.5s.6.4 1.1.5h2.1c.5-.1.8-.2 1.1-.5s.6-.4 1.1-.5c.4-.1 1.3-.1 1.8-.3a1.65 1.65 0 0 0 1.82.33l1.04.68a.93.93 0 0 1 .94 1.4l-.82.68a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 .63 1.04c.1.4.3.7.5 1s.4.6.5 1.1v2.1c-.1.5-.2.8-.5 1.1s-.4.6-.5 1.1z"/></svg>,
-  <svg key="i5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>,
-  <svg key="i6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6"><polyline points="21 15 21 21 3 21 3 3 9 3"/><line x1="7" y1="17" x2="17" y2="7"/></svg>,
-  <svg key="i7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>,
-];
-
-function makePlaceholderIcon(n) {
-  return (
-    <svg key={`ph-${n}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <text x="12" y="15" textAnchor="middle" fontSize="9" fill="currentColor">{String(n)}</text>
-    </svg>
-  );
-}
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export default function Task_1({
-  count = 10,
-  icons: userIcons,
-  arcStartOffset = 0.14,
-  initialDurationMs = 800,
+  icons = null,
+  radius = 380,
+  pxPerIcon = 140,
+  padding = 48,
+  stickyOffset = 120,
+  centerLabel = "Integration",
+  premium = true,
+  compact = true,
+  heightMultiplier = 1.0,
+  safeTopInset = 18,
+  onTimelineActiveChange,
+  centerOffset = -18,
 }) {
-  const n = Math.max(1, Math.min(10, Math.floor(count || 10)));
-  const icons = [];
-  if (userIcons && userIcons.length) {
-    for (let i = 0; i < n; i++) icons.push(userIcons[i % userIcons.length]);
-  } else {
-    for (let i = 0; i < n; i++) {
-      icons.push(i < BASE_THEMED_ICONS.length ? BASE_THEMED_ICONS[i] : makePlaceholderIcon(i + 1));
-    }
+  const rootRef = useRef(null);
+  const pinRef = useRef(null);
+  const spacerRef = useRef(null);
+  const svgRef = useRef(null);
+  const rafRef = useRef(null);
+  const resizeObserverRef = useRef(null);
+
+  const activeStateRef = useRef(null);
+  const virtualConsumedRef = useRef(0);
+  const lastTouchYRef = useRef(0);
+  const animatedPathsRef = useRef(new Set());
+  const prevShowCountRef = useRef(0);
+  const lastSvgSizeRef = useRef({ w: 0, std: 0 });
+
+  const [isMobile, setIsMobile] = useState(false);
+  const [lineSegments, setLineSegments] = useState([]); // pairwise segments i -> i+1
+  const [flowReadyTick, setFlowReadyTick] = useState(0); // used to retrigger tick after layout
+
+  const demo = [
+    { id: "a", src: "https://cdn-icons-png.flaticon.com/512/5968/5968254.png", alt: "Google" },
+    { id: "b", src: "https://cdn-icons-png.flaticon.com/512/732/732200.png", alt: "Slack" },
+    { id: "c", src: "https://cdn-icons-png.flaticon.com/512/5968/5968863.png", alt: "Figma" },
+    { id: "d", src: "https://cdn-icons-png.flaticon.com/512/5968/5968520.png", alt: "Notion" },
+    { id: "e", src: "https://cdn-icons-png.flaticon.com/512/5968/5968517.png", alt: "GitHub" },
+    { id: "f", src: "https://cdn-icons-png.flaticon.com/512/5968/5968381.png", alt: "Meta" },
+    { id: "g", src: "https://cdn-icons-png.flaticon.com/512/1384/1384060.png", alt: "YouTube" },
+    { id: "h", src: "https://cdn-icons-png.flaticon.com/512/5968/5968292.png", alt: "Instagram" },
+    { id: "i", src: "https://cdn-icons-png.flaticon.com/512/733/733579.png", alt: "Twitter" },
+    { id: "j", src: "https://cdn-icons-png.flaticon.com/512/3536/3536505.png", alt: "LinkedIn" },
+    { id: "k", src: "https://cdn-icons-png.flaticon.com/512/888/888879.png", alt: "Stripe" },
+    { id: "l", src: "https://cdn-icons-png.flaticon.com/512/5968/5968557.png", alt: "Dropbox" }
+  ];
+
+  const list = (icons && icons.length) ? icons : demo;
+  const COUNT = list.length;
+  const revealDistance = COUNT * pxPerIcon;
+
+  const visualHeightRaw = Math.round((radius + padding * 2) * heightMultiplier * (compact ? 0.85 : 1));
+  const visualHeight = Math.max(220, visualHeightRaw);
+
+  function sizeScaleForWidth(width) {
+    if (width >= 1200) return 1.0;
+    if (width >= 900) return 0.95;
+    if (width >= 640) return 0.88;
+    return 0.78;
   }
 
-  const sectionRef = useRef(null);
-  const svgWrapRef = useRef(null);
-  const wrapRef = useRef(null);
-  const pathRef = useRef(null);
-  const pillRefs = useRef([]);
-  const belowRef = useRef(null);
-
-  const BASE_WIDTH = 1400;
-  const VIEW_W = BASE_WIDTH;
-  const R = Math.round(VIEW_W * 0.58);
-  const heightScale = 0.48;
-  const VIEW_H = Math.max(110, Math.round(R * heightScale));
-
-  const state = useRef({
-    current: 0,
-    target: 0,
-    smoothing: 0.14,
-    rafId: null,
-    visible: false,
-  });
-
-  const DRAW_START_PCT = 0.12;
-  const lerp = (a, b, t) => a + (b - a) * t;
-
-  const MANUAL_T_POSITIONS = {
-    10: [0.01, 0.09, 0.18, 0.30, 0.42, 0.54, 0.66, 0.78, 0.90, 0.99],
-    7: [0.02, 0.18, 0.33, 0.50, 0.67, 0.82, 0.98],
-    5: [0.03, 0.28, 0.50, 0.72, 0.97],
-    default: Array.from({ length: n }, (_, i) => (n === 1 ? 0.5 : i / (n - 1))),
+  const styles = {
+    root: {
+      position: 'relative',
+      height: `${visualHeight}px`,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'visible',
+      margin: '40px 0',
+      color: 'white',
+      paddingTop: '18px'
+    },
+    backdrop: premium ? {
+      position: 'absolute',
+      inset: 0,
+      zIndex: 1,
+      pointerEvents: 'none',
+      background: 'linear-gradient(180deg, rgba(14,10,24,0.72), rgba(28,20,45,0.74))',
+      boxShadow: 'inset 0 40px 80px rgba(0,0,0,0.55), 0 16px 48px rgba(5,6,15,0.6)',
+      borderRadius: '14px',
+      border: '1px solid rgba(255,240,200,0.03)'
+    } : {},
+    sheen: premium ? {
+      position: 'absolute',
+      left: '-40%',
+      top: '-40%',
+      width: '200%',
+      height: '200%',
+      zIndex: 3,
+      pointerEvents: 'none',
+      background: 'linear-gradient(120deg, rgba(255,255,255,0.02), rgba(255,255,255,0.06) 25%, rgba(255,255,255,0.02) 40%)',
+      transform: 'rotate(-14deg)',
+      mixBlendMode: 'overlay',
+      animation: 'sheenMove 8s linear infinite'
+    } : {},
+    card: {
+      position: 'relative',
+      zIndex: 4,
+      width: '100%',
+      maxWidth: '1100px',
+      margin: '0 auto',
+      padding: '12px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxSizing: 'border-box',
+    },
+    pin: {
+      position: 'relative',
+      width: '100%',
+      height: `${Math.round(visualHeight)}px`,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'transform 380ms cubic-bezier(.2,9,2,1), opacity 260ms ease',
+      willChange: 'transform, opacity',
+    },
+    arc: {
+      position: 'relative',
+      width: '100%',
+      height: `${Math.round(visualHeight)}px`,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'visible',
+    },
+    centerBase: {
+      position: 'absolute',
+      borderRadius: '12px',
+      background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))',
+      boxShadow: '0 10px 30px rgba(6,6,18,0.6)',
+      border: '1px solid rgba(255,235,170,0.05)',
+      color: 'white',
+      zIndex: 8,
+      backdropFilter: 'blur(6px)',
+      textTransform: 'uppercase',
+      fontWeight: 800,
+      letterSpacing: 0.6,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    arcItemBase: {
+      position: 'absolute',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: '50%',
+      background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))',
+      boxShadow: '0 8px 28px rgba(6,6,20,0.6)',
+      border: '1px solid rgba(255,255,255,0.06)',
+      transition: 'transform 360ms cubic-bezier(.2,9,2,1), opacity 280ms ease, box-shadow 360ms ease',
+      overflow: 'hidden',
+      zIndex: 7,
+    },
+    imgBase: {
+      objectFit: 'contain',
+      pointerEvents: 'none',
+      filter: 'drop-shadow(0 6px 14px rgba(0,0,0,0.45))'
+    },
+    spacer: {
+      position: 'relative',
+      display: 'block',
+      height: `${revealDistance}px`,
+      marginTop: `-${revealDistance}px`,
+      visibility: 'hidden',
+      pointerEvents: 'none',
+    }
   };
 
-  const PREMIUM_ACCENTS = ['#D4AF37','#06B6D4','#8B5CF6','#F97316','#60A5FA','#10B981','#F472B6','#FBCFE8','#A78BFA','#34D399'];
-  const TARGET_VISIBLE = Math.min(n, 8);
-
-  function arcPath(inset = 0) {
-    const cx = VIEW_W / 2;
-    const cy = R;
-    const r = Math.min(VIEW_W * 0.58, R * 1.05) - inset;
-    const start = 220;
-    const end = -40;
-    const sx = cx + r * Math.cos((start * Math.PI) / 180);
-    const sy = cy + r * Math.sin((start * Math.PI) / 180);
-    const ex = cx + r * Math.cos((end * Math.PI) / 180);
-    const ey = cy + r * Math.sin((end * Math.PI) / 180);
-    return { cx, cy, r, sx, sy, ex, ey, pathData: `M ${sx} ${sy} A ${r} ${r} 0 0 1 ${ex} ${ey}` };
-  }
-  const arcPaths = [arcPath(0), arcPath(36), arcPath(72)];
-
-  useEffect(() => {
-    function layout() {
-      const wrap = wrapRef.current;
-      const svgWrap = svgWrapRef.current;
-      const path = pathRef.current;
-      if (!wrap || !svgWrap || !path) return;
-
-      const wrapRect = wrap.getBoundingClientRect();
-      const svgEl = svgWrap.querySelector('svg');
-      if (!svgEl) return;
-      const svgRect = svgEl.getBoundingClientRect();
-      const totalLen = path.getTotalLength();
-      const tPositions = MANUAL_T_POSITIONS[n] || MANUAL_T_POSITIONS.default;
-      const scaleX = svgRect.width / VIEW_W;
-      const scaleY = svgRect.height / R;
-
-      for (let i = 0; i < n; i++) {
-        const el = pillRefs.current[i];
-        if (!el) continue;
-        const t = tPositions[i];
-        const pt = path.getPointAtLength(totalLen * t);
-        const px = (pt.x * scaleX) + (svgRect.left - wrapRect.left);
-        const py = (pt.y * scaleY) + (svgRect.top - wrapRect.top);
-        el.style.left = `${px}px`;
-        el.style.top = `${py}px`;
-
-        const ahead = Math.min(totalLen, totalLen * t + 1);
-        const ptAhead = path.getPointAtLength(ahead);
-        const dx = (ptAhead.x - pt.x) * scaleX;
-        const dy = (ptAhead.y - pt.y) * scaleY;
-        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-        el.style.setProperty('--rotate', `${angle}deg`);
-        el.dataset.t = String(t);
+  // ---------- measurement & SVG sync (useLayoutEffect for reliable DOM sizes) ----------
+  useLayoutEffect(() => {
+    // recompute function (keeps local scope)
+    function recompute() {
+      const pin = pinRef.current;
+      const rootEl = rootRef.current;
+      if (!pin || !rootEl) {
+        setLineSegments([]);
+        return;
       }
 
-      if (belowRef.current) {
-        const centerX = wrapRect.width / 2;
-        const centerY = wrapRect.height / 2;
-        const el = belowRef.current;
-        el.style.position = "absolute";
-        el.style.left = `${centerX}px`;
-        el.style.top = `${centerY}px`;
-        el.style.transform = "translate(-50%, -50%)";
-        el.style.zIndex = 22;
+      const rootRect = rootEl.getBoundingClientRect();
+      const pinRect = pin.getBoundingClientRect();
+      const width = Math.max(200, rootRect.width);
+      const scale = sizeScaleForWidth(width);
+
+      const centerDefaultW = compact ? 220 * scale : 260 * scale;
+      const centerDefaultH = compact ? 100 * scale : 120 * scale;
+
+      const availableAboveCenter = (pinRect.height / 2) - (centerDefaultH / 2) - safeTopInset;
+      const maxAllowedRadiusVertically = Math.max(40, availableAboveCenter);
+      const widthCap = Math.max(80, (width / 1200) * radius);
+
+      const effectiveRadius = Math.max(40, Math.min(radius * Math.min(1, width / 1200), maxAllowedRadiusVertically * 0.98, widthCap));
+
+      // position arc items
+      const items = Array.from(pin.querySelectorAll('.arc-item'));
+      items.forEach((el, i) => {
+        const t = COUNT === 1 ? 0.5 : i / (COUNT - 1);
+        const angle = Math.PI * (1 - t) * 0.9;
+
+        let x = Math.cos(angle) * effectiveRadius;
+        let y = -Math.sin(angle) * effectiveRadius * 0.95;
+
+        const maxTopOffset = maxAllowedRadiusVertically;
+        if (-y > maxTopOffset) {
+          y = -maxTopOffset;
+        }
+
+        const itemSize = compact ? Math.round(64 * scale) : Math.round(72 * scale);
+
+        el.style.width = `${itemSize}px`;
+        el.style.height = `${itemSize}px`;
+        el.style.left = '50%';
+        el.style.top = '50%';
+        el.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(0.92)`;
+        el.style.transitionDelay = `${i * 36}ms`;
+        el.style.opacity = '0';
+
+        const img = el.querySelector('img');
+        if (img) {
+          img.style.width = `${Math.round((itemSize * 0.68))}px`;
+          img.style.height = `${Math.round((itemSize * 0.68))}px`;
+        }
+      });
+
+      // center card sizing
+      const center = pin.querySelector('.center-card');
+      if (center) {
+        const cw = Math.round(centerDefaultW);
+        const ch = Math.round(centerDefaultH);
+        center.style.width = `${cw}px`;
+        center.style.height = `${ch}px`;
+        center.style.fontSize = `${compact ? Math.round(16 * scale) : 20}px`;
+        center.style.borderRadius = `${Math.max(10, Math.round(12 * scale))}px`;
+        center.style.transform = `translateY(${centerOffset}px)`;
       }
+
+      // compute icon centers relative to pin
+      const pinTop = pinRect.top;
+      const pinLeft = pinRect.left;
+      const computedItems = Array.from(pin.querySelectorAll('.arc-item'));
+      const positions = computedItems.map((el) => {
+        const rect = el.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2 - pinLeft;
+        const cy = rect.top + rect.height / 2 - pinTop;
+        return { x: Math.round(cx), y: Math.round(cy) };
+      });
+
+      // update SVG pixel width/height/viewBox to match pin - important for filter coords
+      const svgEl = svgRef.current;
+      if (svgEl) {
+        const w = Math.max(120, Math.round(pinRect.width || 1100));
+        const h = Math.max(80, Math.round(pinRect.height || 600));
+        svgEl.setAttribute('width', String(w));
+        svgEl.setAttribute('height', String(h));
+        svgEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
+        svgEl.style.width = '100%';
+        svgEl.style.height = '100%';
+        svgEl.style.overflow = 'visible';
+      }
+
+      // create simple pairwise line segments (i -> i+1)
+      const segments = [];
+      for (let i = 0; i < positions.length - 1; i++) {
+        const a = positions[i];
+        const b = positions[i + 1];
+        segments.push({
+          id: `seg-${i}`,
+          x1: a.x,
+          y1: a.y,
+          x2: b.x,
+          y2: b.y
+        });
+      }
+
+      setLineSegments(segments);
+      // bump tick so other effects see change
+      setFlowReadyTick((t) => t + 1);
     }
 
-    layout();
-    window.addEventListener('resize', layout, { passive: true });
-    const ro = new ResizeObserver(layout);
-    if (svgWrapRef.current) ro.observe(svgWrapRef.current);
+    // initial recompute synchronously (layout effect -> accurate)
+    recompute();
+
+    // observe size changes of root/pin and recompute
+    const rootEl = rootRef.current;
+    if (rootEl && window.ResizeObserver) {
+      resizeObserverRef.current = new ResizeObserver(() => {
+        // use rAF to avoid layout thrash
+        requestAnimationFrame(recompute);
+      });
+      resizeObserverRef.current.observe(rootEl);
+      // also observe pin
+      const pin = pinRef.current;
+      if (pin) resizeObserverRef.current.observe(pin);
+    }
+
+    // also listen to window resize as fallback
+    const onWinResize = () => requestAnimationFrame(recompute);
+    window.addEventListener('resize', onWinResize);
+
+    // guard: after images load (icons), recompute once more
+    const imgs = pinRef.current ? Array.from(pinRef.current.querySelectorAll('img')) : [];
+    let loadedCount = 0;
+    const onImgLoad = () => {
+      loadedCount++;
+      if (loadedCount === imgs.length) requestAnimationFrame(recompute);
+    };
+    imgs.forEach((im) => im.addEventListener('load', onImgLoad));
 
     return () => {
-      window.removeEventListener('resize', layout);
-      ro.disconnect();
+      if (resizeObserverRef.current && rootEl) resizeObserverRef.current.disconnect();
+      window.removeEventListener('resize', onWinResize);
+      imgs.forEach((im) => im.removeEventListener('load', onImgLoad));
     };
-  }, [n]);
+    // we intentionally depend on COUNT, compact, radius and centerOffset so recompute runs when props change
+  }, [COUNT, compact, radius, padding, safeTopInset, centerOffset]);
 
-  function revealIconsByT(tCenter, drawnLen = Infinity) {
-    const path = pathRef.current;
-    if (!path) return;
-    const totalLen = path.getTotalLength();
-    const tPositions = MANUAL_T_POSITIONS[n] || MANUAL_T_POSITIONS.default;
+  // spacer height sync
+  useEffect(() => {
+    virtualConsumedRef.current = 0;
+    const spacer = spacerRef.current;
+    if (!spacer) return;
+    spacer.style.height = `${revealDistance}px`;
+    spacer.style.marginTop = `-${revealDistance}px`;
+  }, [revealDistance]);
 
-    const distances = tPositions.map((t,i) => ({ i, d: Math.abs(t - tCenter), t }));
-    distances.sort((a,b) => a.d - b.d);
-    const toShow = new Set(distances.slice(0, TARGET_VISIBLE).map(x => x.i));
+  // isMobile detection
+  useEffect(() => {
+    const check = () => { if (typeof window !== "undefined") setIsMobile(window.innerWidth < 768); };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
-    for (let i = 0; i < n; i++) {
-      const t = tPositions[i];
-      const thresholdLen = totalLen * t;
-      const withinArc = thresholdLen <= (drawnLen + 1.5);
-      const pill = pillRefs.current[i];
-      if (!pill) continue;
-      const pop = pill.querySelector('.pop');
-      if (!pop) continue;
-      if (withinArc && toShow.has(i)) pop.classList.add('pop-in');
-      else pop.classList.remove('pop-in');
-    }
+  // helpers for animating lines (works with <line>)
+  function getPathElById(id) {
+    const svg = svgRef.current;
+    if (!svg || !id) return null;
+    // lines live inside svg; query there
+    return svg.querySelector(`#${CSS.escape ? CSS.escape(id) : id}`);
   }
 
-  function animateErase(duration = 600, stagger = 70) {
-    const path = pathRef.current;
-    if (!path) return;
-    const totalLen = path.getTotalLength();
-    const current = parseFloat(getComputedStyle(path).strokeDashoffset || path.style.strokeDashoffset || totalLen) || totalLen;
-    const startTime = performance.now();
-    function step(ts) {
-      const p = Math.min(1, (ts - startTime) / Math.max(1, duration));
-      const ease = 1 - (1 - p) * (1 - p);
-      path.style.strokeDashoffset = `${current + (totalLen - current) * ease}`;
-      if (p < 1) requestAnimationFrame(step);
-    }
-    requestAnimationFrame(step);
+  function animatePathOnce(pathEl, duration = 700) {
+    if (!pathEl) return;
+    const pid = pathEl.id;
+    if (!pid) return;
+    if (animatedPathsRef.current.has(pid)) return; // already drawn
 
-    const visible = [];
-    for (let i=0;i<n;i++) {
-      const pill = pillRefs.current[i];
-      if (!pill) continue;
-      const pop = pill.querySelector('.pop');
-      if (pop && pop.classList.contains('pop-in')) visible.push(i);
-    }
-    visible.sort((a,b) => Math.abs((parseFloat(pillRefs.current[a].dataset.t)||0.5)-0.5) - Math.abs((parseFloat(pillRefs.current[b].dataset.t)||0.5)-0.5));
-    visible.forEach((idx, ii) => {
-      setTimeout(()=> {
-        const pill = pillRefs.current[idx];
-        if (!pill) return;
-        const pop = pill.querySelector('.pop'); if (pop) pop.classList.remove('pop-in');
-      }, ii * stagger);
+    let len;
+    try { len = pathEl.getTotalLength(); } catch (e) { len = 600; }
+    pathEl.style.strokeDasharray = `${len}`;
+    pathEl.style.strokeDashoffset = `${len}`;
+    pathEl.style.opacity = '0';
+    pathEl.getBoundingClientRect();
+
+    pathEl.style.transition = `stroke-dashoffset ${duration}ms cubic-bezier(.22,.9,.36,1), opacity ${Math.min(220, Math.round(duration/6))}ms ease-out`;
+    requestAnimationFrame(() => {
+      pathEl.style.strokeDashoffset = '0';
+      pathEl.style.opacity = '1';
     });
+
+    const tidy = () => {
+      pathEl.style.transition = '';
+      pathEl.style.strokeDashoffset = '0';
+      animatedPathsRef.current.add(pid);
+      pathEl.removeEventListener('transitionend', tidy);
+    };
+    pathEl.addEventListener('transitionend', tidy);
   }
 
+  function animatePathRemoveOnce(pathEl, duration = 520) {
+    if (!pathEl) return;
+    const pid = pathEl.id;
+    if (!pid) return;
+
+    let len;
+    try { len = pathEl.getTotalLength(); } catch (e) { len = 600; }
+
+    pathEl.style.strokeDasharray = `${len}`;
+    pathEl.style.strokeDashoffset = `0`;
+    pathEl.style.opacity = '1';
+    pathEl.getBoundingClientRect();
+
+    pathEl.style.transition = `stroke-dashoffset ${duration}ms cubic-bezier(.2,.6,.2,1), opacity ${Math.min(200, Math.round(duration/6))}ms ease`;
+    requestAnimationFrame(() => {
+      pathEl.style.strokeDashoffset = `${len}`;
+      pathEl.style.opacity = '0';
+    });
+
+    const tidy = () => {
+      pathEl.style.transition = '';
+      pathEl.style.strokeDasharray = '';
+      pathEl.style.strokeDashoffset = '';
+      animatedPathsRef.current.delete(pid);
+      pathEl.removeEventListener('transitionend', tidy);
+    };
+    pathEl.addEventListener('transitionend', tidy);
+  }
+
+  // main tick: show icons progressively and animate lines between visible icons
   useEffect(() => {
-    const path = pathRef.current;
-    if (!path) return;
-    const totalLen = path.getTotalLength();
-    path.style.strokeDasharray = `${totalLen}`;
-    path.style.strokeDashoffset = `${totalLen}`;
-  }, [n]);
+    if (isMobile) return undefined;
 
-  useEffect(() => {
-    const section = sectionRef.current;
-    const path = pathRef.current;
-    if (!section || !path) return;
-    const s = state.current;
-    const totalLen = path.getTotalLength();
-
-    function computeRawFromRect(rect) {
-      if (rect.bottom <= window.innerHeight) {
-        return 1;
-      }
-      const denom = window.innerHeight + rect.height;
-      if (denom <= 0) return 0;
-      const raw = (window.innerHeight - rect.top) / denom;
-      return Math.max(0, Math.min(1, raw));
-    }
-
-    function computeCenterTFromRaw(raw) {
-      const tPositions = MANUAL_T_POSITIONS[n] || MANUAL_T_POSITIONS.default;
-      const tMin = Math.min(...tPositions);
-      const tMax = Math.max(...tPositions);
-      return tMin + raw * (tMax - tMin);
-    }
-
-    function onScroll() {
-      const rect = section.getBoundingClientRect();
-
-      if (rect.bottom <= 0 || rect.top >= window.innerHeight) {
-        s.target = 0;
-        animateErase(550, 60);
+    function tick() {
+      const root = rootRef.current;
+      const pin = pinRef.current;
+      const spacer = spacerRef.current;
+      if (!root || !pin || !spacer) {
+        rafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      if (rect.bottom <= window.innerHeight) {
-        s.target = 1;
-        return;
+      const stickyTopPx = stickyOffset;
+      const rootTopPage = root.getBoundingClientRect().top + (window.scrollY || window.pageYOffset || 0);
+      const startRevealScroll = Math.max(0, rootTopPage - stickyTopPx);
+      const scrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop;
+
+      let consumed = 0;
+      let isVisuallyPinned = false;
+
+      if (document.body.style.overflow === 'hidden') {
+        consumed = virtualConsumedRef.current;
+        isVisuallyPinned = consumed > 0 && consumed < revealDistance;
+      } else {
+        let rawConsumed = scrollY - startRevealScroll;
+        if (rawConsumed > revealDistance) consumed = revealDistance;
+        else consumed = Math.min(Math.max(rawConsumed, 0), revealDistance);
+        isVisuallyPinned = consumed > 0 && consumed < revealDistance;
+        virtualConsumedRef.current = consumed;
       }
 
-      const raw = computeRawFromRect(rect);
-      s.target = Math.max(0, Math.min(1, raw));
-    }
+      const progress = revealDistance > 0 ? consumed / revealDistance : 0;
+      const showCount = Math.floor(progress * COUNT);
+      const shouldLockScroll = isVisuallyPinned;
+      const wasActive = activeStateRef.current !== null;
 
-    function intersectionCb(entries) {
-      const e = entries[0];
-      if (!e) return;
-      const svgWrap = svgWrapRef.current;
-      const wrap = wrapRef.current;
-      if (e.isIntersecting) {
-        if (svgWrap) {
-          svgWrap.style.opacity = '1';
+      if (typeof onTimelineActiveChange === 'function' && shouldLockScroll !== wasActive) {
+        onTimelineActiveChange(shouldLockScroll);
+        if (!shouldLockScroll && (consumed <= 0 || consumed >= revealDistance)) {
+          const target = (consumed >= revealDistance) ? rootTopPage + spacer.offsetHeight : Math.max(0, startRevealScroll - 1);
+          requestAnimationFrame(() => window.scrollTo({ top: target, behavior: 'auto' }));
         }
-        if (wrap) {
-          wrap.style.opacity = '1';
+      }
+
+      // animate icons in/out
+      const items = pin.querySelectorAll('.arc-item');
+      items.forEach((el, idx) => {
+        const baseTransform = el.style.transform.replace(/\s*scale\([^)]+\)/, '');
+        if (idx < showCount) {
+          el.style.opacity = '1';
+          el.style.transform = `${baseTransform} scale(1)`;
+          el.style.boxShadow = '0 22px 70px rgba(10,8,30,0.6)';
+        } else {
+          el.style.opacity = '0';
+          el.style.transform = `${baseTransform} scale(0.92)`;
+          el.style.boxShadow = '0 8px 30px rgba(10,8,20,0.45)';
+        }
+      });
+
+      const prev = prevShowCountRef.current || 0;
+
+      // animate lines when icons appear/disappear
+      if (showCount > prev) {
+        for (let k = prev; k < showCount; k++) {
+          const segIndex = k - 1;
+          if (segIndex >= 0 && segIndex < lineSegments.length) {
+            const sid = lineSegments[segIndex].id;
+            const segEl = getPathElById(sid);
+            if (segEl && !animatedPathsRef.current.has(sid)) {
+              const dur = 420 + Math.min(500, Math.round(segIndex * 20));
+              segEl.style.opacity = '0';
+              animatePathOnce(segEl, dur);
+            }
+          }
+        }
+      } else if (showCount < prev) {
+        for (let k = Math.max(1, showCount); k <= prev - 1; k++) {
+          const segIndex = k - 1;
+          if (segIndex >= 0 && segIndex < lineSegments.length) {
+            const sid = lineSegments[segIndex].id;
+            const segEl = getPathElById(sid);
+            if (segEl && animatedPathsRef.current.has(sid)) {
+              const dur = 360 + Math.min(420, Math.round(segIndex * 18));
+              animatePathRemoveOnce(segEl, dur);
+            } else if (segEl) {
+              segEl.style.opacity = '0';
+              animatedPathsRef.current.delete(sid);
+            }
+          }
+        }
+      }
+
+      prevShowCountRef.current = showCount;
+
+      // pin positioning (unchanged)
+      if (isVisuallyPinned) {
+        if (activeStateRef.current === null) {
+          const rootRect = root.getBoundingClientRect();
+          pin.style.position = 'fixed';
+          pin.style.left = `${rootRect.left}px`;
+          pin.style.width = `${rootRect.width}px`;
+          pin.style.top = `${stickyOffset}px`;
+          pin.style.zIndex = 9999;
+          pin.style.pointerEvents = 'none';
+          pin.style.opacity = '1';
+          activeStateRef.current = stickyOffset;
         }
       } else {
-        if (svgWrap) {
-          svgWrap.style.opacity = '0';
-        }
-        if (wrap) {
-          wrap.style.opacity = '0';
+        if (activeStateRef.current !== null) {
+          pin.style.opacity = '0';
+          activeStateRef.current = null;
+          setTimeout(() => {
+            pin.style.position = '';
+            pin.style.left = '';
+            pin.style.width = '';
+            pin.style.top = '';
+            pin.style.zIndex = '';
+            pin.style.pointerEvents = '';
+            pin.style.opacity = '';
+          }, 60);
         }
       }
+
+      rafRef.current = requestAnimationFrame(tick);
     }
 
-    const io = new IntersectionObserver(intersectionCb, { threshold: [0.01] });
-    io.observe(section);
+    // start tick
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+    // include flowReadyTick so we re-start tick after layout recompute
+  }, [COUNT, revealDistance, stickyOffset, onTimelineActiveChange, safeTopInset, centerOffset, lineSegments, isMobile, flowReadyTick]);
 
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('touchmove', onScroll, { passive: true });
+  // body scroll locking handlers (unchanged)
+  useEffect(() => {
+    if (isMobile) return undefined;
 
-    onScroll();
-
-    function loop() {
-      s.current = lerp(s.current, s.target, state.current.smoothing);
-      const arcProgress = DRAW_START_PCT + s.current * (1 - DRAW_START_PCT);
-      const drawnLen = totalLen * arcProgress;
-      path.style.strokeDashoffset = `${Math.max(0, totalLen - drawnLen)}`;
-
-      const rect = section.getBoundingClientRect();
-      const raw = computeRawFromRect(rect);
-      const tCenter = computeCenterTFromRaw(raw);
-      revealIconsByT(tCenter, drawnLen);
-
-      const translate = (1 - s.current) * 12;
-      const opacity = 0.2 + s.current * 0.8;
-      const svgWrap = svgWrapRef.current;
-      const wrap = wrapRef.current;
-      if (svgWrap) {
-        svgWrap.style.transform = `translateX(-50%) translateY(${translate}px)`;
-        svgWrap.style.opacity = `${opacity}`;
+    const handleScrollEvent = (e) => {
+      if (document.body.style.overflow === 'hidden') {
+        if (e.cancelable) e.preventDefault();
+        let deltaY = 0;
+        if (e.type === 'wheel') deltaY = e.deltaY;
+        else if (e.type === 'touchmove' && e.touches.length > 0) {
+          const lastY = lastTouchYRef.current;
+          const currentY = e.touches[0].clientY;
+          if (currentY > lastY) deltaY = -15; else if (currentY < lastY) deltaY = 15;
+          lastTouchYRef.current = currentY;
+        } else if (e.type === 'touchstart' && e.touches.length > 0) {
+          lastTouchYRef.current = e.touches[0].clientY; return;
+        }
+        const sensitivity = 1;
+        const newConsumed = virtualConsumedRef.current + deltaY * sensitivity;
+        virtualConsumedRef.current = Math.max(0, Math.min(revealDistance, newConsumed));
       }
-      if (wrap) {
-        wrap.style.transform = `translateY(${translate}px)`;
-        wrap.style.opacity = `${opacity}`;
-      }
+    };
 
-      state.current.rafId = requestAnimationFrame(loop);
-    }
-
-    state.current.rafId = requestAnimationFrame(loop);
+    window.addEventListener('wheel', handleScrollEvent, { passive: false });
+    window.addEventListener('touchstart', handleScrollEvent, { passive: false });
+    window.addEventListener('touchmove', handleScrollEvent, { passive: false });
 
     return () => {
-      io.disconnect();
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('touchmove', onScroll);
-      if (state.current.rafId) cancelAnimationFrame(state.current.rafId);
+      window.removeEventListener('wheel', handleScrollEvent);
+      window.removeEventListener('touchstart', handleScrollEvent);
+      window.removeEventListener('touchmove', handleScrollEvent);
     };
-  }, [n]);
+  }, [revealDistance, isMobile]);
 
-  const css = `
-  :root { --wrap-w: ${VIEW_W}px; --wrap-h: ${VIEW_H}px; --pill: 76px; --pill-sm: 56px; --arc-start-offset: ${arcStartOffset}; }
-  .arc-cursor { padding: 16px 18px 16px; background: linear-gradient(180deg, #041226 0%, #061428 40%, #071730 100%); border-radius: 14px; overflow: visible; box-shadow: 0 20px 80px rgba(2,6,23,0.45); color: #EAF6FF; }
-  .inner { max-width: ${VIEW_W}px; margin:0 auto; text-align:center; position:relative; }
-  .visual { height:var(--wrap-h); position:relative; display:flex; align-items:flex-start; justify-content:center; pointer-events:none; }
-  .svg-wrap { position:absolute; left:50%; width:var(--wrap-w); height:${R}px; transform: translateX(-50%) translateY(0); transition: opacity 240ms ease, transform 300ms ease; z-index:2; opacity:0; pointer-events:none; }
-  .wrap { width:var(--wrap-w); height:var(--wrap-h); margin:0 auto; position:relative; transform: translateY(0); transition: opacity 240ms ease, transform 300ms ease; z-index:6; opacity:0; pointer-events:none; overflow:visible; }
-  .below { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); text-align:center; pointer-events:auto; z-index: 20; opacity: 1; max-width: 78%; margin: 0 auto; }
-  svg.arcs { width:100%; height:${R}px; overflow:visible; display:block; }
-  svg.arcs .arc { fill:none; stroke: rgba(255,255,255,0.12); stroke-width:4.5; stroke-linecap:round; stroke-linejoin:round; filter: drop-shadow(0 12px 44px rgba(6,12,28,0.7)); }
-  svg.arcs .a2 { stroke: rgba(255,255,255,0.06); stroke-width:3.2; opacity:0.95; }
-  svg.arcs .a3 { stroke: rgba(255,255,255,0.03); stroke-width:2.0; opacity:0.9; }
+  // tune svg filter and stroke widths when segments update
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    const pin = pinRef.current;
+    if (!svgEl || !pin) return;
 
-  .pill { position:absolute; width:var(--pill); height:var(--pill); border-radius:50%; display:flex; align-items:center; justify-content:center; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 20px 40px rgba(2,6,23,0.55), inset 0 1px 0 rgba(255,255,255,0.02); transform: translate(-50%,-50%) rotate(var(--rotate,0deg)); z-index:8; transition: transform 260ms cubic-bezier(.2,.9,.3,1), box-shadow 180ms; backdrop-filter: blur(6px); pointer-events:auto; font-size:0; }
-  .pill.small { width:var(--pill-sm); height:var(--pill-sm); }
-  .pill .pop { width:100%; height:100%; border-radius:50%; display:flex; align-items:center; justify-content:center; transform: translateY(30px) scale(.9); opacity:0; transition: transform 420ms cubic-bezier(.2,1,.3,1), opacity 360ms cubic-bezier(.2,1,.3,1); will-change: transform, opacity; }
-  .pill .pop.pop-in { transform: translateY(0) scale(1); opacity:1; }
-  .glyph { width:28px; height:28px; display:block; color:var(--glyph-color, #D4AF37); filter: drop-shadow(0 8px 20px rgba(0,0,0,0.6)); }
-  .sub { color: #BFD7FF; font-size:11px; margin-bottom:6px; font-weight:700; text-transform:uppercase; letter-spacing:1px; }
-  .title { font-size:20px; font-weight:900; margin:6px 0 8px; color: #EAF6FF; letter-spacing:-0.6px; text-shadow: 0 8px 20px rgba(6,12,28,0.6); }
-  .cta { display:inline-block; padding:8px 18px; border-radius:14px; background: linear-gradient(90deg,#D4AF37,#FBBF24 60%); color:#081427; box-shadow: 0 12px 36px rgba(212,175,55,0.16), 0 6px 16px rgba(7,20,40,0.44) inset; text-decoration:none; font-weight:800; }
-  @media (max-width:1100px){ :root{ --wrap-w: 900px; } .title{ font-size:18px; } }
-  @media (max-width:760px){ :root{ --wrap-w: 640px; } .title{ font-size:16px; } }
-  @media (max-width:420px){ :root{ --wrap-w: 360px; } .title{ font-size:14px; } }
-  @media (prefers-reduced-motion: reduce) { .pill, .pill .pop, .svg-wrap, .wrap, .below { transition: none !important; animation: none !important; } }
-  `;
+    const w = Math.max(120, Math.round(pin.clientWidth));
+    const stdDev = Math.max(1, Math.round(w / 320)); // milder blur for straight lines
 
+    if (lastSvgSizeRef.current.w === w && lastSvgSizeRef.current.std === stdDev) return;
+    lastSvgSizeRef.current = { w, std: stdDev };
+
+    const fe = svgEl.querySelector('feGaussianBlur');
+    if (fe) fe.setAttribute('stdDeviation', String(stdDev));
+
+    const primaryLines = svgEl.querySelectorAll('.integration-connection-line:not(.bg)');
+    primaryLines.forEach((p) => {
+      p.style.strokeWidth = `${Math.max(1.0, (w / 1100) * 2.2)}px`;
+    });
+    const bgLines = svgEl.querySelectorAll('.integration-connection-line.bg');
+    bgLines.forEach((p) => {
+      p.style.strokeWidth = `${Math.max(2.2, (w / 1100) * 3.8)}px`;
+    });
+
+    // ensure positions are up-to-date one more time
+    requestAnimationFrame(() => {
+      // trigger layout recompute via state (safe)
+      setFlowReadyTick((t) => t + 1);
+    });
+  }, [lineSegments]);
+
+  // ---------- RENDER ----------
+  if (isMobile) {
+    // simplified mobile layout (unchanged)
+    const mobileIcons = list.slice();
+    const n = mobileIcons.length;
+    const spacingFactor = 12;
+    const suggested = Math.max(80, Math.round(n * spacingFactor));
+    const arcRadius = Math.min(170, suggested);
+    const arcHeight = arcRadius + 40;
+    const centerCardHeight = 52;
+    const itemSize = 40;
+    const imgSize = Math.round(itemSize * 0.72);
+
+    function getTransformForIndex(i) {
+      if (n === 1) {
+        const x = 0;
+        const y = -arcRadius;
+        return `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+      }
+      const step = 180 / (n - 1);
+      const angleDeg = 180 - (i * step);
+      const rad = angleDeg * (Math.PI / 180);
+      const x = Math.cos(rad) * arcRadius;
+      const y = -Math.sin(rad) * arcRadius;
+      return `translate(calc(-50% + ${Math.round(x)}px), calc(-50% + ${Math.round(y)}px))`;
+    }
+
+    const mobileRootStyle = {
+      position: 'relative',
+      padding: 12,
+      textAlign: 'center',
+      width: '100%',
+      boxSizing: 'border-box',
+      color: 'white',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 6,
+    };
+
+    const arcWrapperStyle = {
+      position: 'relative',
+      width: '100%',
+      maxWidth: 420,
+      height: `${arcHeight}px`,
+      boxSizing: 'border-box',
+      marginBottom: 6,
+      overflow: 'visible',
+    };
+
+    const centerCardStyle = {
+      height: centerCardHeight,
+      minWidth: 140,
+      padding: '8px 14px',
+      borderRadius: 12,
+      background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))',
+      border: '1px solid rgba(255,255,255,0.06)',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontWeight: 700,
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      zIndex: 4,
+      boxShadow: '0 8px 20px rgba(0,0,0,0.35)'
+    };
+
+    const itemBaseStyle = {
+      position: 'absolute',
+      left: '50%',
+      top: '50%',
+      width: `${itemSize}px`,
+      height: `${itemSize}px`,
+      borderRadius: '50%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))',
+      border: '1px solid rgba(255,255,255,0.06)',
+      boxShadow: '0 6px 14px rgba(0,0,0,0.35)',
+      transform: 'translate(-50%,-50%)',
+      zIndex: 5,
+    };
+
+    return (
+      <div ref={rootRef} style={mobileRootStyle} aria-label="Integrations mobile semicircle all icons">
+        {premium && <div style={{ position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none', background: 'linear-gradient(180deg, rgba(14,10,24,0.72), rgba(28,20,45,0.74))', borderRadius: 12 }} aria-hidden />}
+
+        <div style={arcWrapperStyle}>
+          {mobileIcons.map((icon, i) => (
+            <div
+              key={icon.id ?? i}
+              className="arc-mobile-item"
+              style={{
+                ...itemBaseStyle,
+                width: `${itemSize}px`,
+                height: `${itemSize}px`,
+                transform: getTransformForIndex(i),
+                transition: 'transform 220ms ease, opacity 160ms ease',
+                opacity: 1,
+              }}
+              aria-hidden
+            >
+              <img src={icon.src} alt={icon.alt ?? `icon ${i + 1}`} style={{ width: imgSize, height: imgSize, objectFit: 'contain' }} draggable={false} />
+            </div>
+          ))}
+        </div>
+
+        <div style={centerCardStyle}>
+          {centerLabel}
+        </div>
+      </div>
+    );
+  }
+
+  // desktop: pairwise lines
   return (
-    <section className="arc-cursor" ref={sectionRef} aria-label="Integrations arc visualization">
-      <style>{css}</style>
-      <div className="inner">
-        <div className="visual">
-          <div className="svg-wrap" ref={svgWrapRef} aria-hidden>
-            <svg className="arcs" viewBox={`0 0 ${VIEW_W} ${R}`} preserveAspectRatio="xMidYMid slice">
-              <path ref={pathRef} className="arc" d={arcPaths[0].pathData} />
-              <path className="arc a2" d={arcPaths[1].pathData} />
-              <path className="arc a3" d={arcPaths[2].pathData} />
+    <div ref={rootRef} style={styles.root} aria-label="Integrations premium compact">
+      <style>{`
+        @keyframes sheenMove {
+          0% { transform: translateX(-30%) rotate(-14deg); }
+          50% { transform: translateX(30%) rotate(-14deg); }
+          100% { transform: translateX(-30%) rotate(-14deg); }
+        }
+
+        .integration-connection-svg {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 100%;
+          height: 100%;
+          pointer-events: none;
+          z-index: 5;
+        }
+
+        .integration-connection-line {
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke: url(#grad-arc);
+          fill: none;
+          opacity: 0;
+        }
+
+        .integration-connection-line.bg {
+          opacity: 0.06;
+          filter: blur(3px);
+        }
+
+        .arc-item img { pointer-events: none; user-select: none; -webkit-user-drag: none; }
+      `}</style>
+
+      {premium && <div style={styles.backdrop} aria-hidden />}
+      {premium && <div style={styles.sheen} aria-hidden />}
+
+      <div style={styles.card}>
+        <div ref={pinRef} style={styles.pin}>
+          <div style={styles.arc} aria-hidden>
+            <svg
+              ref={svgRef}
+              className="integration-connection-svg"
+              viewBox={`0 0 1100 600`}
+              preserveAspectRatio="xMinYMin meet"
+              aria-hidden
+              style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 5, overflow: 'visible' }}
+            >
+              <defs>
+                <linearGradient id="grad-arc" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#9ec6ff" stopOpacity="1" />
+                  <stop offset="50%" stopColor="#5bb0ff" stopOpacity="1" />
+                  <stop offset="100%" stopColor="#66d0ff" stopOpacity="1" />
+                </linearGradient>
+
+                <filter id="glow" x="-60%" y="-60%" width="220%" height="220%" filterUnits="userSpaceOnUse">
+                  <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="coloredBlur" />
+                  <feMerge>
+                    <feMergeNode in="coloredBlur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+              </defs>
+
+              {/* background faint lines */}
+              {lineSegments.map((s) => (
+                <line
+                  key={`${s.id}-bg`}
+                  id={`${s.id}-bg`}
+                  x1={s.x1}
+                  y1={s.y1}
+                  x2={s.x2}
+                  y2={s.y2}
+                  className="integration-connection-line bg"
+                  style={{
+                    stroke: 'url(#grad-arc)',
+                    vectorEffect: 'non-scaling-stroke',
+                    strokeWidth: Math.max(2.2, (pinRef.current ? (pinRef.current.clientWidth / 1100) * 3.6 : 3)),
+                    opacity: 0.06
+                  }}
+                />
+              ))}
+
+              {/* primary animated lines */}
+              {lineSegments.map((s) => (
+                <line
+                  key={s.id}
+                  id={s.id}
+                  x1={s.x1}
+                  y1={s.y1}
+                  x2={s.x2}
+                  y2={s.y2}
+                  className="integration-connection-line"
+                  style={{
+                    filter: 'url(#glow)',
+                    stroke: 'url(#grad-arc)',
+                    strokeWidth: Math.max(1.0, (pinRef.current ? (pinRef.current.clientWidth / 1100) * 2.2 : 2.2)),
+                    opacity: 0,
+                    vectorEffect: 'non-scaling-stroke'
+                  }}
+                />
+              ))}
             </svg>
-          </div>
 
-          <div className="wrap" ref={wrapRef}>
-            {icons.map((ic, i) => {
-              const accent = PREMIUM_ACCENTS[i % PREMIUM_ACCENTS.length];
-              const glow = accent + '22';
-              return (
-                <div
-                  key={i}
-                  ref={(el) => (pillRefs.current[i] = el)}
-                  className={`pill ${i % 3 === 0 ? 'small' : ''}`}
-                  data-accent
-                  style={{ ['--accent-glow']: glow, ['--glyph-color']: accent }}
-                  aria-hidden
-                >
-                  <div className="pop">
-                    <div className="glyph" aria-hidden>
-                      {React.isValidElement(ic)
-                        ? React.cloneElement(ic, { width: 28, height: 28, style: { display: 'block', color: 'currentColor' } })
-                        : <span>{ic}</span>}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {/* icon items */}
+            {list.map((icon, i) => (
+              <div
+                key={icon.id ?? i}
+                className="arc-item"
+                style={{
+                  ...styles.arcItemBase,
+                  width: compact ? 64 : 72,
+                  height: compact ? 64 : 72,
+                  left: '50%',
+                  top: '50%',
+                  transform: 'translate(-50%,-50%) scale(0.92)',
+                  opacity: 0,
+                }}
+                aria-hidden
+              >
+                <img src={icon.src} alt={icon.alt ?? `icon ${i + 1}`} style={{ ...styles.imgBase, width: compact ? 44 : 48, height: compact ? 44 : 48 }} draggable={false} />
+              </div>
+            ))}
 
-            <div className="below" ref={belowRef} aria-hidden={false}>
-              <div className="sub">Integration Ecosystem</div>
-              <h2 className="title">Seamless Integrations</h2>
-              <a className="cta" href="#contact">Talk to sales</a>
+            {/* center card */}
+            <div className="center-card" style={{
+              ...styles.centerBase,
+              width: compact ? 220 : 260,
+              height: compact ? 100 : 120,
+              fontSize: compact ? 16 : 20,
+              transform: `translateY(${centerOffset}px)`
+            }}>
+              {centerLabel}
             </div>
           </div>
         </div>
       </div>
-    </section>
+
+      <div ref={spacerRef} style={styles.spacer} aria-hidden />
+    </div>
   );
 }
